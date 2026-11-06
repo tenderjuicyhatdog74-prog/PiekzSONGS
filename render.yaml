@@ -1,0 +1,8 @@
+services:
+  - type: web
+    name: plum-music-discovery
+    runtime: python
+    plan: free
+    buildCommand: python -m compileall -q server.py
+    startCommand: python server.py
+    healthCheckPath: /
