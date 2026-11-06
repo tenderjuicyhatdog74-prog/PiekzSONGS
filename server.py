@@ -91,7 +91,41 @@ class DuckParser(HTMLParser):
     def handle_data(self,data):
         if self.current is not None and self.capture:self.current[self.capture]+=' '+data
 
+class PageMetadata(HTMLParser):
+    def __init__(self):
+        super().__init__();self.title='';self.description='';self.in_title=False
+    def handle_starttag(self,tag,attrs):
+        a=dict(attrs)
+        if tag=='title':self.in_title=True
+        if tag=='meta' and (a.get('name','').lower()=='description' or a.get('property','').lower()=='og:description') and not self.description:self.description=a.get('content','')
+    def handle_endtag(self,tag):
+        if tag=='title':self.in_title=False
+    def handle_data(self,text):
+        if self.in_title:self.title+=text
+
+def direct_meanings(title, artist):
+    """Look for exact matches on music-interpretation sites when search engines block servers."""
+    ts=normalize(title).replace(' ','-'); ars=normalize(artist).replace(' ','-')
+    if not ts or not ars:return []
+    sources=[('SongSummaries', 'https://www.songsummaries.com/song/'+ars+'/'+ts),('LyricsMeanings','https://lyricsmeanings.com/'+ars+'-'+ts)]
+    results=[]
+    for source,url in sources:
+        try:
+            request=Request(url,headers={'User-Agent':'Mozilla/5.0','Accept':'text/html'})
+            with urlopen(request,timeout=6) as r: data=r.read(1_000_000).decode('utf-8','replace')
+            p=PageMetadata();p.feed(data)
+            # Check the actual page title so a redirect or an error page cannot be mistaken for a match.
+            page=normalize(p.title); relevant=normalize(title) in page and normalize(artist) in page
+            description=' '.join(p.description.split())
+            if not relevant or len(description)<45 or not re.search(r'love|longing|song|lyrics|emotion|heart|grief|theme|relationship|meaning|desire|fear',description,re.I):continue
+            words=description.split();snippet=' '.join(words[:25])+('…' if len(words)>25 else '')
+            results.append({'title':p.title.strip()+' — '+source,'url':url,'snippet':snippet})
+        except (HTTPError,URLError,TimeoutError,OSError,ValueError):pass
+    return results
+
 def web_lookup(title, artist):
+    direct=direct_meanings(title,artist)
+    if direct:return {'status':'ok','results':direct}
     query='"'+title+'" "'+artist+'" song meaning'
     req=Request('https://lite.duckduckgo.com/lite/?'+urlencode({'q':query}),headers={'User-Agent':'Mozilla/5.0'})
     try:
